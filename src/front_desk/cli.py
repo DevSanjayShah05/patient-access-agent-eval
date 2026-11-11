@@ -1,0 +1,54 @@
+"""python -m front_desk.cli run [--guarded] [--limit N]   |   python -m front_desk.cli evaluate"""
+
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+
+from .agent import FrontDeskAgent
+from .clinic import build_clinic
+from .runner import run_episode
+from .scenarios import generate
+
+ROOT = Path(__file__).resolve().parents[2]
+RES = ROOT / "data" / "results"
+
+
+def cmd_run(guarded: bool, model: str, limit: int | None) -> None:
+    RES.mkdir(parents=True, exist_ok=True)
+    scenarios, base = generate(build_clinic(), n_per_type=10)
+    (ROOT / "data" / "scenarios.json").write_text(json.dumps(
+        [{"scenario_id": s.scenario_id, "kind": s.kind, "opening": s.opening, "expect": s.expect,
+          "persona": {k: v for k, v in s.persona.items()}} for s in scenarios], indent=1, default=str))
+    agent = FrontDeskAgent(model=model, guarded=guarded)
+    out = RES / f"episodes_{agent.name.replace(':', '-').replace('+', '_')}.jsonl"
+    done = {json.loads(l)["scenario_id"] for l in open(out)} if out.exists() else set()
+    todo = [s for s in scenarios if s.scenario_id not in done][: limit or None]
+    print(f"{agent.name}: {len(done)} done, {len(todo)} to go", flush=True)
+    with open(out, "a") as f:
+        for i, s in enumerate(todo, 1):
+            r = run_episode(s, base, agent)
+            f.write(json.dumps(r, default=str) + "\n")
+            f.flush()
+            print(f"  {i}/{len(todo)} {s.scenario_id} success={r['success']} {r['wall_seconds']}s", flush=True)
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    r = sub.add_parser("run")
+    r.add_argument("--guarded", action="store_true")
+    r.add_argument("--model", default="qwen2.5:7b")
+    r.add_argument("--limit", type=int)
+    sub.add_parser("evaluate")
+    a = ap.parse_args()
+    if a.cmd == "run":
+        cmd_run(a.guarded, a.model, a.limit)
+    else:
+        from .evaluate import run_all
+        run_all()
+
+
+if __name__ == "__main__":
+    main()
