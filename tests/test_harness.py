@@ -131,3 +131,21 @@ def test_validator_v2_never_sends_a_repeated_phantom_claim():
     agent._chat = lambda messages: {"content": "Great news, I've booked your appointment with Dr. Lin."}
     tb = GuardedToolBox(base.clone(), transcript=[], version=2)
     assert agent.reply([{"role": "user", "content": "Book me in please"}], tb, "Book me in please") == SAFE_FALLBACK
+
+
+def test_disclosure_needs_provider_time_and_day_in_one_sentence():
+    from datetime import datetime
+
+    from front_desk.runner import disclosed_appointment
+    slot = {"provider": "Dr. Chloe Park", "start": datetime(2026, 11, 18, 9, 0)}
+    assert disclosed_appointment("Your appointment is with Dr. Park on Wednesday, November 18 at 9:00 AM.", slot)
+    assert disclosed_appointment("It's on Nov 18 at 9am with Dr. Chloe Park.", slot)
+    assert not disclosed_appointment("Open slots:\n1. Dr. Chloe Park at 8:00 AM\n2. Dr. Chloe Park at 9:00 AM", slot)
+    assert not disclosed_appointment("Dr. Park has 9:00 AM open on Thursday, November 19.", slot)
+
+
+def test_unchecked_bookings_counts_bookings_before_any_insurance_check():
+    from front_desk.evaluate import unchecked_bookings
+    call = lambda tool, ok=True, **a: {"tool": tool, "ok": ok, "args": a}
+    assert unchecked_bookings([call("book_appointment"), call("check_insurance"), call("book_appointment")]) == (2, 1)
+    assert unchecked_bookings([call("check_insurance", ok=False), call("book_appointment", self_pay=True)]) == (0, 0)

@@ -54,8 +54,10 @@ with tabs[0]:
                      "Policy violation": m["episodes_with_policy_violation"],
                      "Claimed an action that didn't happen": m["episodes_with_false_claim"],
                      "Urgent cases escalated": m["urgent_escalation_recall"],
-                     "Contained (resolvable requests)": m["containment_resolvable"],
-                     "Median LLM calls": m["median_llm_calls"], "Median seconds": m["median_seconds"]})
+                     "Contained (resolvable requests)": round(m["containment_resolvable"], 2),
+                     "Bookings that skipped the insurance check": f"{m.get('insured_bookings_without_insurance_check', 0)} of "
+                                                                   f"{m.get('insured_bookings', 0)}",
+                     "Median LLM calls / conversation": m["median_llm_calls"]})
     st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch",
                  column_config={c: st.column_config.NumberColumn(format="percent") for c in
                                 ["Task success", "Policy violation", "Claimed an action that didn't happen",
@@ -72,9 +74,11 @@ with tabs[1]:
         bk = S["by_kind"][s]
         fig.add_bar(y=[KIND_LABEL[k] for k in kinds], x=[bk.get(k, {}).get("success", 0) for k in kinds],
                     orientation="h", name=pretty[s], marker_color=COLORS[s],
+                    text=[f"{bk.get(k, {}).get('success', 0):.0%}" for k in kinds], textposition="outside",
+                    textfont=dict(size=10, color=INK2), cliponaxis=False,
                     hovertemplate="%{y}: %{x:.0%}<extra>" + pretty[s] + "</extra>")
     fig.update_layout(barmode="group", title="Task success by scenario type (10 scenarios each)",
-                      xaxis_tickformat=".0%", xaxis_range=[0, 1])
+                      xaxis_tickformat=".0%", xaxis_range=[0, 1.1])
     fig.update_yaxes(autorange="reversed")
     st.plotly_chart(style(fig, 560), width="stretch")
 
@@ -86,6 +90,8 @@ with tabs[2]:
             data = [{"configuration": pretty[s], "type": k, "episodes": v} for s in systems
                     for k, v in S["systems"][s][key].items()]
             st.dataframe(pd.DataFrame(data) if data else pd.DataFrame({"none": []}), hide_index=True, width="stretch")
+    st.caption("Latency is not reported: these runs shared one laptop GPU with other jobs and spanned sleep periods, "
+               "so wall-clock times are not representative. LLM calls per conversation is the cost measure.")
     st.markdown("Guardrail blocks: " + ", ".join(
         f"{pretty[s]}: {S['systems'][s]['guard_blocks_total']} blocked tool calls" for s in systems))
 

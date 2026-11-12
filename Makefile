@@ -3,7 +3,7 @@ export PYTHONPATH := src:.
 
 setup:
 	python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
-eval:        ## both configurations, 100 scenarios each (~2 h on an M2; resumable). Needs `ollama pull qwen2.5:7b`
+eval:        ## baseline + guardrails v1 + v2, 100 scenarios each (~1.5-2.5 h each on an M2; resumable). Needs `ollama pull qwen2.5:7b`
 	./scripts/run_evals.sh
 evaluate:
 	$(PY) -m front_desk.cli evaluate
