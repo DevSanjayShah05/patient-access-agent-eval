@@ -11,7 +11,7 @@ import streamlit as st
 
 ROOT = Path(__file__).resolve().parents[1]
 RES = ROOT / "data" / "results"
-COLORS = {"qwen2.5:7b": "#eb6834", "qwen2.5:7b+guardrails": "#2a78d6"}
+COLORS = {"qwen2.5:7b": "#eb6834", "qwen2.5:7b+guardrails": "#9ec2ee", "qwen2.5:7b+guardrails_v2": "#2a78d6"}
 INK2, GRID = "#52514e", "#e7e6e1"
 KIND_LABEL = {"book_existing": "Book (existing patient)", "book_new_patient": "Book (new patient)",
               "reschedule": "Reschedule", "cancel": "Cancel (>24h)", "late_cancel": "Late cancel (<24h, $50 fee)",
@@ -38,7 +38,7 @@ def load():
 
 S, E = load()
 pretty = S["pretty"]
-systems = [x for x in ["qwen2.5:7b", "qwen2.5:7b+guardrails"] if x in S["systems"]]
+systems = [x for x in COLORS if x in S["systems"]]
 
 st.title("Front Desk")
 st.caption("Evaluating an AI patient-access agent (scheduling, intake, triage) on 100 **SYNTHETIC** scenarios against a "
@@ -60,10 +60,9 @@ with tabs[0]:
                  column_config={c: st.column_config.NumberColumn(format="percent") for c in
                                 ["Task success", "Policy violation", "Claimed an action that didn't happen",
                                  "Urgent cases escalated", "Contained (resolvable requests)"]})
-    if "paired" in S:
-        p = S["paired"]
-        st.markdown(f"Same {p['n_pairs']} scenarios for both: guardrails succeeded where the baseline failed in "
-                    f"**{p['guardrails_only_success']}**, the reverse in **{p['baseline_only_success']}** "
+    for s, p in S.get("paired", {}).items():
+        st.markdown(f"**{pretty[s]} vs baseline**, same {p['n_pairs']} scenarios: succeeded where the baseline failed in "
+                    f"**{p['only_this_succeeds']}**, the reverse in **{p['only_baseline_succeeds']}** "
                     f"(exact McNemar p = {p['mcnemar_exact_p']:.3g}).")
 
 with tabs[1]:
@@ -107,5 +106,5 @@ with tabs[3]:
                 st.warning("Claimed without a successful tool call: " + ", ".join(r.unsupported_claims))
             for t in r.transcript:
                 st.markdown(f"**{'Patient' if t['role'] == 'patient' else 'Agent'}:** {t['text']}")
-            st.caption("Tools: " + " → ".join(f"{x['tool']}{' (blocked)' if x.get('blocked') else '' if x['ok'] else ' (error)'}"
+            st.caption("Tools: " + " → ".join(f"{x['tool']}{' (auto)' if x.get('auto') else ''}{' (blocked)' if x.get('blocked') else '' if x['ok'] else ' (error)'}"
                                               for x in r.tool_calls))

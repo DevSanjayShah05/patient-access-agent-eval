@@ -1,4 +1,4 @@
-"""python -m front_desk.cli run [--guarded] [--limit N]   |   python -m front_desk.cli evaluate"""
+"""python -m front_desk.cli run [--guarded [--guard-version 1|2]] [--limit N]   |   python -m front_desk.cli evaluate"""
 
 from __future__ import annotations
 
@@ -15,13 +15,13 @@ ROOT = Path(__file__).resolve().parents[2]
 RES = ROOT / "data" / "results"
 
 
-def cmd_run(guarded: bool, model: str, limit: int | None) -> None:
+def cmd_run(guarded: bool, model: str, limit: int | None, guard_version: int = 2) -> None:
     RES.mkdir(parents=True, exist_ok=True)
     scenarios, base = generate(build_clinic(), n_per_type=10)
     (ROOT / "data" / "scenarios.json").write_text(json.dumps(
         [{"scenario_id": s.scenario_id, "kind": s.kind, "opening": s.opening, "expect": s.expect,
           "persona": {k: v for k, v in s.persona.items()}} for s in scenarios], indent=1, default=str))
-    agent = FrontDeskAgent(model=model, guarded=guarded)
+    agent = FrontDeskAgent(model=model, guarded=guarded, guard_version=guard_version)
     out = RES / f"episodes_{agent.name.replace(':', '-').replace('+', '_')}.jsonl"
     done = {json.loads(l)["scenario_id"] for l in open(out)} if out.exists() else set()
     todo = [s for s in scenarios if s.scenario_id not in done][: limit or None]
@@ -41,10 +41,11 @@ def main() -> None:
     r.add_argument("--guarded", action="store_true")
     r.add_argument("--model", default="qwen2.5:7b")
     r.add_argument("--limit", type=int)
+    r.add_argument("--guard-version", type=int, default=2, choices=[1, 2])
     sub.add_parser("evaluate")
     a = ap.parse_args()
     if a.cmd == "run":
-        cmd_run(a.guarded, a.model, a.limit)
+        cmd_run(a.guarded, a.model, a.limit, a.guard_version)
     else:
         from .evaluate import run_all
         run_all()

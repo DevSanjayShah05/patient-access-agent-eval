@@ -86,3 +86,48 @@ def test_stats_helpers():
     lo, hi = wilson(50, 100)
     assert lo < 0.5 < hi and abs(hi - lo - 0.19) < 0.01
     assert mcnemar_exact(0, 10) < 0.01 and mcnemar_exact(5, 5) == 1.0
+
+
+def _verified_tb(base, plan: str, version: int):
+    c = base.clone()
+    tb = GuardedToolBox(c, transcript=[], version=version)
+    pid = next(p for p, v in c.patients.items() if v["insurance"] == plan)
+    tb.verified.add(pid)
+    slot = next(s for s, v in c.slots.items() if v["open"])
+    return c, tb, pid, slot
+
+
+def test_guard_v1_blocks_unchecked_insurance_but_v2_checks_it_itself():
+    _, base = setup()
+    c, tb, pid, slot = _verified_tb(base, "Medicare", version=1)
+    assert "Insurance not checked" in tb.call("book_appointment", {"patient_id": pid, "slot_id": slot})["error"]
+    c, tb, pid, slot = _verified_tb(base, "Medicare", version=2)
+    r = tb.call("book_appointment", {"patient_id": pid, "slot_id": slot})
+    assert "error" not in r and not c.slots[slot]["open"]
+    assert [x["tool"] for x in tb.log] == ["check_insurance", "book_appointment"] and tb.log[0]["auto"]
+
+
+def test_guard_v2_still_blocks_non_accepted_plan_without_self_pay():
+    _, base = setup()
+    c, tb, pid, slot = _verified_tb(base, "Oscar Health", version=2)
+    r = tb.call("book_appointment", {"patient_id": pid, "slot_id": slot})
+    assert "not accepted" in r["error"] and c.slots[slot]["open"]
+
+
+def test_claim_detector_v2_phrasings():
+    assert claimed_actions("Your appointment has been successfully cancelled.") == ["cancel_appointment"]
+    assert claimed_actions("It has been successfully rescheduled with Dr. Lin.") == ["reschedule_appointment"]
+    assert claimed_actions("I've confirmed your appointment with Dr. Lin on Wednesday.") == ["book_appointment"]
+    assert claimed_actions("I've reserved your appointment for 9 AM.") == ["book_appointment"]
+    assert claimed_actions("I've verified your identity, Jose.") == []
+    assert claimed_actions("I've confirmed that you have an appointment with Dr. Lin.") == []
+    assert claimed_actions("I've confirmed that Cigna is accepted.") == []
+
+
+def test_validator_v2_never_sends_a_repeated_phantom_claim():
+    from front_desk.agent import SAFE_FALLBACK, FrontDeskAgent
+    _, base = setup()
+    agent = FrontDeskAgent(guarded=True, guard_version=2)
+    agent._chat = lambda messages: {"content": "Great news, I've booked your appointment with Dr. Lin."}
+    tb = GuardedToolBox(base.clone(), transcript=[], version=2)
+    assert agent.reply([{"role": "user", "content": "Book me in please"}], tb, "Book me in please") == SAFE_FALLBACK

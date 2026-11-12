@@ -38,8 +38,8 @@ def new_session(req: NewSession) -> dict:
     sid = uuid.uuid4().hex[:12]
     clinic = build_clinic()
     transcript: list[dict] = []
-    tb = GuardedToolBox(clinic, transcript) if req.guarded else ToolBox(clinic)
-    SESSIONS[sid] = {"agent": FrontDeskAgent(req.model, guarded=req.guarded), "tb": tb, "transcript": transcript,
+    tb = GuardedToolBox(clinic, transcript, 2) if req.guarded else ToolBox(clinic)
+    SESSIONS[sid] = {"agent": FrontDeskAgent(req.model, guarded=req.guarded, guard_version=2), "tb": tb, "transcript": transcript,
                      "messages": [{"role": "system", "content": SYSTEM}]}
     return {"session_id": sid, "guarded": req.guarded}
 

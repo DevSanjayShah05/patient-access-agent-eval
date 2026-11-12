@@ -10,7 +10,9 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[2]
 RES = ROOT / "data" / "results"
-PRETTY = {"qwen2.5:7b": "Baseline agent", "qwen2.5:7b+guardrails": "Agent + guardrails"}
+PRETTY = {"qwen2.5:7b": "Baseline agent", "qwen2.5:7b+guardrails": "Guardrails v1 (block only)",
+          "qwen2.5:7b+guardrails_v2": "Guardrails v2"}
+BASELINE = "qwen2.5:7b"
 
 
 def wilson(k: int, n: int, z: float = 1.96) -> list[float]:
@@ -72,14 +74,14 @@ def run_all() -> dict:
         out["by_kind"][sysname] = d.groupby("kind").agg(
             success=("success", "mean"), violation=("violations", lambda s: (s.map(len) > 0).mean()),
             false_claim=("hallucinated_action", "mean"), n=("success", "size")).round(3).to_dict("index")
-    systems = sorted(df.system.unique())
-    if len(systems) == 2:
-        a, b = systems
-        piv = df.pivot_table(index="scenario_id", columns="system", values="success", aggfunc="first").dropna()
-        only_b = int(((piv[b] == 1) & (piv[a] == 0)).sum())
-        only_a = int(((piv[a] == 1) & (piv[b] == 0)).sum())
-        out["paired"] = {"n_pairs": int(len(piv)), "guardrails_only_success": only_b, "baseline_only_success": only_a,
-                         "mcnemar_exact_p": mcnemar_exact(only_a, only_b)}
+    piv = df.pivot_table(index="scenario_id", columns="system", values="success", aggfunc="first")
+    out["paired"] = {}
+    for other in [x for x in sorted(df.system.unique()) if x != BASELINE and BASELINE in piv]:
+        pr = piv[[BASELINE, other]].dropna()
+        only_o = int(((pr[other] == 1) & (pr[BASELINE] == 0)).sum())
+        only_b = int(((pr[BASELINE] == 1) & (pr[other] == 0)).sum())
+        out["paired"][other] = {"vs": BASELINE, "n_pairs": int(len(pr)), "only_this_succeeds": only_o,
+                                "only_baseline_succeeds": only_b, "mcnemar_exact_p": mcnemar_exact(only_b, only_o)}
     RES.mkdir(parents=True, exist_ok=True)
     (RES / "summary.json").write_text(json.dumps(out, indent=2, default=float))
     rows = []
@@ -91,6 +93,6 @@ def run_all() -> dict:
         print(f"{PRETTY.get(s, s):22s} success {m['task_success']:.2f} {[round(x, 2) for x in m['task_success_ci95']]} "
               f"violations {m['episodes_with_policy_violation']:.2f} false-claims {m['episodes_with_false_claim']:.2f} "
               f"urgent recall {m['urgent_escalation_recall']} containment {m['containment_resolvable']:.2f} n={m['episodes']}")
-    if "paired" in out:
-        print(out["paired"])
+    for k, v in out["paired"].items():
+        print(PRETTY.get(k, k), v)
     return out

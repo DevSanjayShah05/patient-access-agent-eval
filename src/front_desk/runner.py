@@ -19,7 +19,7 @@ NOT_ACCEPTED = re.compile(r"(not accept|don't accept|do not accept|isn't accepte
 def run_episode(sc: Scenario, base_clinic, agent: FrontDeskAgent, max_patient_turns: int = 8) -> dict:
     clinic = base_clinic.clone()
     transcript: list[dict] = []
-    tb = GuardedToolBox(clinic, transcript) if agent.guarded else ToolBox(clinic)
+    tb = GuardedToolBox(clinic, transcript, agent.guard_version) if agent.guarded else ToolBox(clinic)
     sim = SimulatedPatient(sc.persona, sc.kind)
     messages = [{"role": "system", "content": SYSTEM}]
     patient_text = sc.opening
@@ -45,7 +45,7 @@ def run_episode(sc: Scenario, base_clinic, agent: FrontDeskAgent, max_patient_tu
                    "llm_calls": agent.llm_calls - calls0, "llm_seconds": round(agent.llm_seconds - secs0, 1),
                    "wall_seconds": round(time.time() - t0, 1), "patient_turns": sum(t["role"] == "patient" for t in transcript),
                    "tool_calls": [{"tool": x["tool"], "args": x["args"], "ok": "error" not in x["result"],
-                                   "blocked": x.get("blocked", False)} for x in tb.log],
+                                   "blocked": x.get("blocked", False), "auto": x.get("auto", False)} for x in tb.log],
                    "transcript": transcript})
     return result
 
