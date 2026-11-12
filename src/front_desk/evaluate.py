@@ -35,18 +35,23 @@ def mcnemar_exact(b: int, c: int) -> float:
     return min(1.0, 2 * p)
 
 
-def load() -> pd.DataFrame:
+def _res(split: str) -> Path:
+    return RES / "test" if split == "test" else RES
+
+
+def load(split: str = "dev") -> pd.DataFrame:
     rows = []
-    for f in sorted(RES.glob("episodes_*.jsonl")):
+    for f in sorted(_res(split).glob("episodes_*.jsonl")):
         rows += [json.loads(l) for l in open(f)]
     return pd.DataFrame(rows)
 
 
-def booking_outcomes(d: pd.DataFrame) -> dict:
+def booking_outcomes(d: pd.DataFrame, split: str = "dev") -> dict:
     """Why booking requests (existing + new patient) failed: the first matching reason per episode."""
     from .clinic import build_clinic
     slots = build_clinic().slots
-    exp = {s["scenario_id"]: s["expect"] for s in json.loads((ROOT / "data" / "scenarios.json").read_text())}
+    scen = "scenarios_test.json" if split == "test" else "scenarios.json"
+    exp = {s["scenario_id"]: s["expect"] for s in json.loads((ROOT / "data" / scen).read_text())}
     out = {}
     for _, e in d[d.kind.isin(["book_existing", "book_new_patient"])].iterrows():
         booked = [t["args"] for t in e.tool_calls if t["tool"] == "book_appointment" and t["ok"]]
@@ -78,7 +83,7 @@ def unchecked_bookings(tool_calls: list[dict]) -> tuple[int, int]:
     return n, skipped
 
 
-def system_metrics(d: pd.DataFrame) -> dict:
+def system_metrics(d: pd.DataFrame, split: str = "dev") -> dict:
     n = len(d)
     urgent = d[d.kind == "urgent_symptom"]
     non_urgent = d[d.kind != "urgent_symptom"]
@@ -99,18 +104,19 @@ def system_metrics(d: pd.DataFrame) -> dict:
         "violation_types": pd.Series([v for vs in d.violations for v in vs]).value_counts().to_dict(),
         "false_claim_types": pd.Series([c for cs in d.unsupported_claims for c in cs]).value_counts().to_dict(),
         "errors": int(d.error.notna().sum()),
-        "booking_outcomes": booking_outcomes(d),
+        "booking_outcomes": booking_outcomes(d, split),
         # Process check, reported separately from task success (which is outcome-based by design).
         "insured_bookings": int(sum(unchecked_bookings(tc)[0] for tc in d.tool_calls)),
         "insured_bookings_without_insurance_check": int(sum(unchecked_bookings(tc)[1] for tc in d.tool_calls)),
     }
 
 
-def run_all() -> dict:
-    df = load()
+def run_all(split: str = "dev") -> dict:
+    df = load(split)
+    res = _res(split)
     out = {"systems": {}, "by_kind": {}, "pretty": PRETTY}
     for sysname, d in df.groupby("system"):
-        out["systems"][sysname] = system_metrics(d)
+        out["systems"][sysname] = system_metrics(d, split)
         out["by_kind"][sysname] = d.groupby("kind").agg(
             success=("success", "mean"), violation=("violations", lambda s: (s.map(len) > 0).mean()),
             false_claim=("hallucinated_action", "mean"), n=("success", "size")).round(3).to_dict("index")
@@ -122,13 +128,13 @@ def run_all() -> dict:
         only_b = int(((pr[BASELINE] == 1) & (pr[other] == 0)).sum())
         out["paired"][other] = {"vs": BASELINE, "n_pairs": int(len(pr)), "only_this_succeeds": only_o,
                                 "only_baseline_succeeds": only_b, "mcnemar_exact_p": mcnemar_exact(only_b, only_o)}
-    RES.mkdir(parents=True, exist_ok=True)
-    (RES / "summary.json").write_text(json.dumps(out, indent=2, default=float))
+    res.mkdir(parents=True, exist_ok=True)
+    (res / "summary.json").write_text(json.dumps(out, indent=2, default=float))
     rows = []
     for s, kinds in out["by_kind"].items():
         for k, v in kinds.items():
             rows.append({"system": PRETTY.get(s, s), "kind": k, **v})
-    pd.DataFrame(rows).to_csv(RES / "by_kind.csv", index=False)
+    pd.DataFrame(rows).to_csv(res / "by_kind.csv", index=False)
     for s, m in out["systems"].items():
         print(f"{PRETTY.get(s, s):22s} success {m['task_success']:.2f} {[round(x, 2) for x in m['task_success_ci95']]} "
               f"violations {m['episodes_with_policy_violation']:.2f} false-claims {m['episodes_with_false_claim']:.2f} "
