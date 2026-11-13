@@ -3,6 +3,8 @@
 **Can an LLM agent run a clinic's front desk without lying to patients? An evaluation harness that grades a
 scheduling agent on what it *did* to the clinic, not on how its replies sound.**
 
+**Live dashboard:** [front-desk-eval.streamlit.app](https://front-desk-eval.streamlit.app/)
+
 > A simulated multi-specialty practice, 100 **SYNTHETIC** patient conversations across 10 request types, a
 > rule-based patient simulator and a state-based grader. Three versions of a local-LLM agent (qwen2.5:7b): no
 > guardrails, a first guardrail design that backfired, and a second design built from that failure analysis.
@@ -50,6 +52,29 @@ is confirmed"). Both conversations were already graded as failures. The honest v
 
 ![Task success by scenario type](docs/screenshots/02_by_type.png)
 
+### Held-out check: 100 new scenarios
+
+v2 was designed after looking at the 100 scenarios above, so its gain could be partly overfitting. Before changing
+anything else, I generated 100 **new** scenarios with a different seed (2027) and committed them
+(`data/scenarios_test.json`). Then I ran the baseline and v2, unchanged, once each. Results are in `data/results/test/`.
+
+| Held-out 100 | Baseline | **Guardrails v2** |
+|---|---|---|
+| Task success (95% CI) | 36% (27–46) | **51% (41–61)** |
+| Told the patient something happened that didn't | 32% | **0% detected** |
+| Urgent symptoms sent to a human + told to call 911/988 | 2 / 10 | **10 / 10** |
+| Policy violations (graded outcomes) | 6% | 8% |
+| Insured bookings made **without checking insurance** | **19 of 22** | **0 of 25** |
+| Resolvable requests fully handled, no human needed | 30% | 33% |
+
+- **The gap held:** +15 points held-out vs +13 on the design set. In paired terms, v2 succeeded where the baseline
+  failed **15** times, and the reverse happened **0** times (exact McNemar **p < 0.001**).
+- **Both systems did worse in absolute terms** (baseline 46% → 36%, v2 59% → 51%). The new seed drew harder
+  cases for this model, and the drop is about the same for both, so the absolute numbers are less stable than the
+  difference between them.
+- **The remaining failures are the same ones:** wrong-day bookings (8 baseline / 7 v2 of 20 booking requests) and
+  reschedules (0/10 for both). Neither guardrail version addresses those, as expected.
+
 ## What happened: three versions, two lessons
 
 **Baseline: policy in the prompt only.**
@@ -91,7 +116,8 @@ policy gaps:
 The obvious next guard is a duplicate-booking check: block a new booking when the patient already has an appointment
 in that specialty, and point the agent to `reschedule_appointment`. I did **not** build it. v2 was already designed
 after seeing these 100 scenarios, and tuning again on the same set would overfit the guardrails to the test. A v3
-belongs on a fresh, held-out scenario seed (the generator is seeded, so that's one argument away).
+belongs on a fresh, held-out scenario seed. The held-out set above is now used for confirming v2, so a v3 would need
+a third seed.
 
 Booking requests, by first failure reason (`booking_outcomes` in `summary.json`):
 
@@ -150,9 +176,11 @@ make api              # FastAPI sandbox: POST /sessions, POST /sessions/{id}/cha
 ollama pull qwen2.5:7b
 make eval             # all three versions × 100 scenarios (resumable; ~1.5–2.5 h each on an M2)
 make evaluate         # recompute summary.json / by_kind.csv from the saved conversations
+PYTHONPATH=src python -m front_desk.cli run --split test [--guarded]   # held-out 100 (seed 2027)
+PYTHONPATH=src python -m front_desk.cli evaluate --split test
 ```
 
-The committed `data/results/` holds all 300 conversations (full transcripts and tool logs), so the dashboard and every
+The committed `data/results/` holds all 300 design-set conversations, plus the 200 held-out ones in `data/results/test/` (full transcripts and tool logs), so the dashboard and every
 number above work without running a model.
 
 ## Limitations
@@ -163,8 +191,8 @@ number above work without running a model.
 - **One small local model.** A 7B model on a laptop. Larger models would likely make fewer date and intent mistakes. The
   harness is model-agnostic (`--model`), and the guardrail lessons are about system design.
 - **10 scenarios per type,** so per-type differences are directional only.
-- **v2 was designed after seeing the test set** (see "What's still broken"). Its gain over the baseline should be
-  confirmed on a held-out seed.
+- **v2 was designed after seeing the first scenario set.** Its gain was then confirmed on 100 held-out scenarios
+  (+15 points, 15:0 paired), but both systems scored lower there in absolute terms.
 - **Not graded:** whether an identity-mismatch caller should be allowed to register as a new patient. Several agents
   did this. It leaked nothing, but a real practice would likely want it flagged.
 - **No latency numbers.** The runs shared one laptop GPU with other jobs and spanned sleep periods, so wall-clock times
